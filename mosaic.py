@@ -1,5 +1,6 @@
 import sys
-import os, os.path
+import os
+import os.path
 from PIL import Image, ImageOps
 from multiprocessing import Process, Queue, cpu_count
 
@@ -12,6 +13,7 @@ TILE_BLOCK_SIZE = TILE_SIZE / max(min(TILE_MATCH_RES, TILE_SIZE), 1)
 WORKER_COUNT = max(cpu_count() - 1, 1)
 OUT_FILE = 'mosaic.jpeg'
 EOQ_VALUE = None
+
 
 class TileProcessor:
     def __init__(self, tiles_directory):
@@ -37,26 +39,71 @@ class TileProcessor:
         except:
             return (None, None)
 
-    def get_tiles(self):
-        large_tiles = []
-        small_tiles = []
-
-        print('Reading tiles from {}...'.format(self.tiles_directory))
-
-        # search the tiles directory recursively
-        for root, subFolders, files in os.walk(self.tiles_directory):
-            for tile_name in files:
-                print('Reading {:40.40}'.format(tile_name), flush=True, end='\r')
+    def __read_tiles(self, parse_queue, parsed_queue):
+        while True:
+            try:
+                root, tile_name = parse_queue.get(True)
+                if root == EOQ_VALUE:
+                    break
                 tile_path = os.path.join(root, tile_name)
+                print('Reading {:40.40}'.format(tile_name), flush=True, end='\r')
                 large_tile, small_tile = self.__process_tile(tile_path)
                 if large_tile:
-                    large_tiles.append(large_tile)
-                    small_tiles.append(small_tile)
+                    parsed_queue.put((large_tile, small_tile))
+            except KeyboardInterrupt:
+                pass
+        parsed_queue.put((EOQ_VALUE, EOQ_VALUE))
+        return
 
+    def get_tiles(self):
+        try:
+            large_tiles = []
+            small_tiles = []
+
+            # Multi core images parsing
+            parse_queue = Queue()
+            parsed_queue = Queue()
+
+            print('Reading tiles from {}...'.format(self.tiles_directory))
+
+            # start the reader processes
+            processes = []
+            for _ in range(WORKER_COUNT):
+                p = Process(target=self.__read_tiles, args=(parse_queue, parsed_queue))
+                processes.append(p)
+                p.start()
+
+            # search the tiles directory recursively
+            for root, subFolders, files in os.walk(self.tiles_directory):
+                for tile_name in files:
+                    parse_queue.put((root, tile_name))
+
+            # Send stop signal to readers
+            for _ in range(WORKER_COUNT):
+                parse_queue.put((EOQ_VALUE, EOQ_VALUE))
+
+            # collect images
+            workingParsers = WORKER_COUNT
+            while workingParsers > 0:
+                large_t, small_t = parsed_queue.get()
+                if large_t == EOQ_VALUE:
+                    workingParsers -= 1
+                    continue
+                large_tiles.append(large_t)
+                small_tiles.append(small_t)
+
+        except KeyboardInterrupt:
+            print('\nStopping parse processes')
+            for p in processes:
+                p.kill()
+            parse_queue.cancel_join_thread()
+            parsed_queue.cancel_join_thread()
+            sys.exit(130)  # terminate with exit from SIGKILL
 
         print('Processed {} tiles.'.format(len(large_tiles)))
 
         return (large_tiles, small_tiles)
+
 
 class TargetImage:
     def __init__(self, image_path):
@@ -82,6 +129,7 @@ class TargetImage:
         print('Main image processed.')
 
         return image_data
+
 
 class TileFitter:
     def __init__(self, tiles_data):
@@ -112,6 +160,7 @@ class TileFitter:
 
         return best_fit_tile_index
 
+
 def fit_tiles(work_queue, result_queue, tiles_data):
     # this function gets run by the worker processes, one on each CPU core
     tile_fitter = TileFitter(tiles_data)
@@ -129,6 +178,7 @@ def fit_tiles(work_queue, result_queue, tiles_data):
     # let the result handler know that this worker has finished everything
     result_queue.put((EOQ_VALUE, EOQ_VALUE))
 
+
 class ProgressCounter:
     def __init__(self, total):
         self.total = total
@@ -137,6 +187,7 @@ class ProgressCounter:
     def update(self):
         self.counter += 1
         print("Progress: {:04.1f}%".format(100 * self.counter / self.total), flush=True, end='\r')
+
 
 class MosaicImage:
     def __init__(self, original_img):
@@ -152,6 +203,7 @@ class MosaicImage:
 
     def save(self, path):
         self.image.save(path)
+
 
 def build_mosaic(result_queue, all_tile_data_large, original_img_large):
     mosaic = MosaicImage(original_img_large)
@@ -174,6 +226,7 @@ def build_mosaic(result_queue, all_tile_data_large, original_img_large):
 
     mosaic.save(OUT_FILE)
     print('\nFinished, output is in', OUT_FILE)
+
 
 def compose(original_img, tiles):
     print('Building mosaic, press Ctrl-C to abort...')
@@ -212,8 +265,10 @@ def compose(original_img, tiles):
         for n in range(WORKER_COUNT):
             work_queue.put((EOQ_VALUE, EOQ_VALUE))
 
+
 def show_error(msg):
     print('ERROR: {}'.format(msg))
+
 
 def mosaic(img_path, tiles_path):
     image_data = TargetImage(img_path).get_data()
@@ -222,6 +277,7 @@ def mosaic(img_path, tiles_path):
         compose(image_data, tiles_data)
     else:
         show_error("No images found in tiles directory '{}'".format(tiles_path))
+
 
 if __name__ == '__main__':
     if len(sys.argv) < 3:
