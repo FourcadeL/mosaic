@@ -24,6 +24,7 @@ G_OUT_FILE = None
 
 G_TILE_BLOCK_SIZE = None
 
+
 class TileProcessor:
     def __init__(self, tiles_directory):
         self.tiles_directory = tiles_directory
