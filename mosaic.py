@@ -181,6 +181,43 @@ class TileFitter:
                 return diff
         return diff
 
+    def __get_tile_diff_lum(self, t1, t2, bail_out_value):
+        """
+        get best fit tile based on luminance value
+        """
+        diff = 0
+        for i in range(len(t1)):
+            diff += (
+                    (0.2126*t1[i][0] + 0.7152*t1[i][1] + 0.0722*t1[i][2]) -
+                    (0.2126*t2[i][0] + 0.7152*t2[i][1] + 0.0722*t2[i][2])
+                    )**2
+            if diff > bail_out_value:
+                # we know already that this isn't going to be the best fit, so no point continuing with this tile
+                return diff
+        return diff
+
+    def __get_tile_diff_lum_color(self, t1, t2, bail_out_value):
+        """
+        get best fit tile based on limunance value
+        with a small color factor
+        """
+        diff = 0
+        for i in range(len(t1)):
+            diff += (
+                    (0.2126*t1[i][0] + 0.7152*t1[i][1] + 0.0722*t1[i][2]) -
+                    (0.2126*t2[i][0] + 0.7152*t2[i][1] + 0.0722*t2[i][2])
+                    )**2  # luminance part
+            diff += (
+                abs(t1[i][0] - t2[i][0])
+                + abs(t1[i][1] - t2[i][1])
+                + abs(t1[i][2] - t2[i][2])
+            )/4  # color part
+
+            if diff > bail_out_value:
+                # we know already that this isn't going to be the best fit, so no point continuing with this tile
+                return diff
+        return diff
+
     def get_best_fit_tile(self, img_data):
         best_fit_tile_index = None
         min_diff = sys.maxsize
@@ -188,7 +225,9 @@ class TileFitter:
 
         # go through each tile in turn looking for the best match for the part of the image represented by 'img_data'
         for tile_data in self.tiles_data:
-            diff = self.__get_tile_diff(img_data, tile_data, min_diff)
+#             diff = self.__get_tile_diff(img_data, tile_data, min_diff)
+#             diff = self.__get_tile_diff_lum(img_data, tile_data, min_diff)
+            diff = self.__get_tile_diff_lum_color(img_data, tile_data, min_diff)
             if diff < min_diff:
                 min_diff = diff
                 best_fit_tile_index = tile_index
