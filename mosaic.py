@@ -6,7 +6,7 @@ import pathlib
 from PIL import Image, ImageOps
 from multiprocessing import Process, Queue, cpu_count
 
-Image.MAX_IMAGE_PIXELS = 1920*1920*(4**4)  # Up the maximum size limit allowed by PIL
+Image.MAX_IMAGE_PIXELS = 1620*1920*(4**4)  # Up the maximum size limit allowed by PIL
 
 # DEFAULT parameters
 DEFAULT_TILE_SIZE = 50  # height/width of mosaic tiles in pixels
