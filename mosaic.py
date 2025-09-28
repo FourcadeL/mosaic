@@ -6,6 +6,8 @@ import pathlib
 from PIL import Image, ImageOps
 from multiprocessing import Process, Queue, cpu_count
 
+Image.MAX_IMAGE_PIXELS = 1920*1920*(4**4)  # Up the maximum size limit allowed by PIL
+
 # DEFAULT parameters
 DEFAULT_TILE_SIZE = 50  # height/width of mosaic tiles in pixels
 DEFAULT_TILE_MATCH_RES = 5  # tile matching resolution (higher values give better fit but require more processing)
@@ -131,6 +133,14 @@ class TargetImage:
         img = Image.open(self.image_path)
         w = img.size[0] * G_ENLARGEMENT
         h = img.size[1] * G_ENLARGEMENT
+        new_size = w * h
+        if new_size > Image.MAX_IMAGE_PIXELS:
+            print("Main image is too heavy after resizing ({} pixels for "
+                    "a max size of {} pixels), consider "
+                    "retrying with a smaller \"enlarge\" parameter"
+                  .format(new_size, Image.MAX_IMAGE_PIXELS))
+            sys.exit(1)
+            raise Image.DecompressionBombError("Too large after resize")
         large_img = img.resize((w, h), Image.LANCZOS)
         w_diff = (w % G_TILE_SIZE) / 2
         h_diff = (h % G_TILE_SIZE) / 2
