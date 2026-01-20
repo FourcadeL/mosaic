@@ -3,10 +3,14 @@ import os
 import os.path
 import argparse
 import pathlib
+from collections import namedtuple
 from PIL import Image, ImageOps
 from multiprocessing import Process, Queue, cpu_count
 
-Image.MAX_IMAGE_PIXELS = 1620*1920*(4**4)  # Up the maximum size limit allowed by PIL
+
+Image.MAX_IMAGE_PIXELS = (
+    1620 * 1920 * (4**4)
+)  # Up the maximum size limit allowed by PIL
 
 # DEFAULT parameters
 DEFAULT_TILE_SIZE = 50  # height/width of mosaic tiles in pixels
@@ -19,19 +23,35 @@ DEFAULT_WORKER_COUNT = max(cpu_count(), 2)
 DEFAULT_OUT_FILE = "mosaic.jpeg"
 EOQ_VALUE = None
 
-# GLOBAL PARAMETERS
-G_TILE_SIZE = DEFAULT_TILE_SIZE
-G_TILE_MATCH_RES = DEFAULT_TILE_MATCH_RES
-G_ENLARGEMENT = DEFAULT_ENLARGEMENT
-G_WORKER_COUNT = DEFAULT_WORKER_COUNT
-G_OUT_FILE = DEFAULT_OUT_FILE
-
-G_TILE_BLOCK_SIZE = 2  # Dummy value
+# Parameter structure
+Parameters = namedtuple(
+    "Parameters",
+    [
+        "source_image",
+        "tiles_directory",
+        "output_file",
+        "tile_size",
+        "match_res",
+        "enlargement",
+        "tile_block_size",
+        "worker_count",
+    ],
+    defaults=[
+        None,
+        None,
+        DEFAULT_OUT_FILE,
+        DEFAULT_TILE_SIZE,
+        DEFAULT_TILE_MATCH_RES,
+        DEFAULT_ENLARGEMENT,
+        None,
+        DEFAULT_WORKER_COUNT,
+    ],
+)
 
 
 class TileProcessor:
-    def __init__(self, tiles_directory):
-        self.tiles_directory = tiles_directory
+    def __init__(self, parameters):
+        self.params = parameters
 
     def __process_tile(self, tile_path):
         try:
@@ -46,11 +66,13 @@ class TileProcessor:
             h_crop = (h - min_dimension) / 2
             img = img.crop((w_crop, h_crop, w - w_crop, h - h_crop))
 
-            large_tile_img = img.resize((G_TILE_SIZE, G_TILE_SIZE), Image.LANCZOS)
+            large_tile_img = img.resize(
+                (self.params.tile_size, self.params.tile_size), Image.LANCZOS
+            )
             small_tile_img = img.resize(
                 (
-                    int(G_TILE_SIZE / G_TILE_BLOCK_SIZE),
-                    int(G_TILE_SIZE / G_TILE_BLOCK_SIZE),
+                    int(self.params.tile_size / self.params.tile_block_size),
+                    int(self.params.tile_size / self.params.tile_block_size),
                 ),
                 Image.LANCZOS,
             )
@@ -59,7 +81,7 @@ class TileProcessor:
         except:
             return (None, None)
 
-    def __read_tiles(self, parse_queue, parsed_queue):
+    def read_tiles(self, parse_queue, parsed_queue):
         while True:
             try:
                 root, tile_name = parse_queue.get(True)
@@ -84,25 +106,25 @@ class TileProcessor:
             large_tiles = []
             small_tiles = []
 
-            print("Reading tiles from {}...".format(self.tiles_directory))
+            print("Reading tiles from {}...".format(self.params.tiles_directory))
 
             # start the reader processes
-            for _ in range(G_WORKER_COUNT):
-                p = Process(target=self.__read_tiles, args=(parse_queue, parsed_queue))
+            for _ in range(self.params.worker_count):
+                p = Process(target=self.read_tiles, args=(parse_queue, parsed_queue))
                 processes.append(p)
                 p.start()
 
             # search the tiles directory recursively
-            for root, _, files in os.walk(self.tiles_directory):
+            for root, _, files in os.walk(self.params.tiles_directory):
                 for tile_name in files:
                     parse_queue.put((root, tile_name))
 
             # Send stop signal to readers
-            for _ in range(G_WORKER_COUNT):
+            for _ in range(self.params.worker_count):
                 parse_queue.put((EOQ_VALUE, EOQ_VALUE))
 
             # collect images
-            workingParsers = G_WORKER_COUNT
+            workingParsers = self.params.worker_count
             while workingParsers > 0:
                 large_t, small_t = parsed_queue.get()
                 if large_t == EOQ_VALUE:
@@ -125,32 +147,39 @@ class TileProcessor:
 
 
 class TargetImage:
-    def __init__(self, image_path):
-        self.image_path = image_path
+    def __init__(self, parameters):
+        self.params = parameters
 
     def get_data(self):
         print("Processing main image...")
-        img = Image.open(self.image_path)
-        w = img.size[0] * G_ENLARGEMENT
-        h = img.size[1] * G_ENLARGEMENT
+        img = Image.open(self.params.source_image)
+        w = img.size[0] * self.params.enlargement
+        h = img.size[1] * self.params.enlargement
         new_size = w * h
         if new_size > Image.MAX_IMAGE_PIXELS:
-            print("Main image is too heavy after resizing ({} pixels for "
-                    "a max size of {} pixels), consider "
-                    "retrying with a smaller \"enlarge\" parameter"
-                  .format(new_size, Image.MAX_IMAGE_PIXELS))
+            print(
+                "Main image is too heavy after resizing ({} pixels for "
+                "a max size of {} pixels), consider "
+                'retrying with a smaller "enlarge" parameter'.format(
+                    new_size, Image.MAX_IMAGE_PIXELS
+                )
+            )
             sys.exit(1)
             raise Image.DecompressionBombError("Too large after resize")
         large_img = img.resize((w, h), Image.LANCZOS)
-        w_diff = (w % G_TILE_SIZE) / 2
-        h_diff = (h % G_TILE_SIZE) / 2
+        w_diff = (w % self.params.tile_size) / 2
+        h_diff = (h % self.params.tile_size) / 2
 
         # if necessary, crop the image slightly so we use a whole number of tiles horizontally and vertically
         if w_diff or h_diff:
             large_img = large_img.crop((w_diff, h_diff, w - w_diff, h - h_diff))
 
         small_img = large_img.resize(
-            (int(w / G_TILE_BLOCK_SIZE), int(h / G_TILE_BLOCK_SIZE)), Image.LANCZOS
+            (
+                int(w / self.params.tile_block_size),
+                int(h / self.params.tile_block_size),
+            ),
+            Image.LANCZOS,
         )
 
         image_data = (large_img.convert("RGB"), small_img.convert("RGB"))
@@ -225,8 +254,8 @@ class TileFitter:
 
         # go through each tile in turn looking for the best match for the part of the image represented by 'img_data'
         for tile_data in self.tiles_data:
-#             diff = self.__get_tile_diff(img_data, tile_data, min_diff)
-#             diff = self.__get_tile_diff_lum(img_data, tile_data, min_diff)
+            #             diff = self.__get_tile_diff(img_data, tile_data, min_diff)
+            #             diff = self.__get_tile_diff_lum(img_data, tile_data, min_diff)
             diff = self.__get_tile_diff_lum_color(img_data, tile_data, min_diff)
             if diff < min_diff:
                 min_diff = diff
@@ -269,14 +298,15 @@ class ProgressCounter:
 
 
 class MosaicImage:
-    def __init__(self, original_img):
+    def __init__(self, original_img, parameters):
+        self.params = parameters
         self.image = Image.new(original_img.mode, original_img.size)
-        self.x_tile_count = int(original_img.size[0] / G_TILE_SIZE)
-        self.y_tile_count = int(original_img.size[1] / G_TILE_SIZE)
+        self.x_tile_count = int(original_img.size[0] / self.params.tile_size)
+        self.y_tile_count = int(original_img.size[1] / self.params.tile_size)
         self.total_tiles = self.x_tile_count * self.y_tile_count
 
     def add_tile(self, tile_data, coords):
-        img = Image.new("RGB", (G_TILE_SIZE, G_TILE_SIZE))
+        img = Image.new("RGB", (self.params.tile_size, self.params.tile_size))
         img.putdata(tile_data)
         self.image.paste(img, coords)
 
@@ -284,10 +314,9 @@ class MosaicImage:
         self.image.save(path)
 
 
-def build_mosaic(result_queue, all_tile_data_large, original_img_large):
-    mosaic = MosaicImage(original_img_large)
-
-    active_workers = G_WORKER_COUNT
+def build_mosaic(result_queue, all_tile_data_large, original_img_large, parameters):
+    mosaic = MosaicImage(original_img_large, parameters)
+    active_workers = parameters.worker_count
     while True:
         try:
             img_coords, best_fit_tile_index = result_queue.get()
@@ -303,32 +332,42 @@ def build_mosaic(result_queue, all_tile_data_large, original_img_large):
         except KeyboardInterrupt:
             pass
 
-    mosaic.save(G_OUT_FILE)
-    print("\nFinished, output is in", G_OUT_FILE)
+    mosaic.save(parameters.output_file)
+    print("\nFinished, output is in", parameters.output_file)
 
 
-def compose(original_img, tiles):
+def compose(original_img, tiles, parameters):
     print("Building mosaic, press Ctrl-C to abort...")
     original_img_large, original_img_small = original_img
     tiles_large, tiles_small = tiles
 
-    mosaic = MosaicImage(original_img_large)
+    mosaic = MosaicImage(original_img_large, parameters)
 
     all_tile_data_large = [list(tile.getdata()) for tile in tiles_large]
     all_tile_data_small = [list(tile.getdata()) for tile in tiles_small]
 
-    work_queue = Queue(G_WORKER_COUNT)
+    work_queue = Queue(parameters.worker_count)
     result_queue = Queue()
 
     try:
         # start the worker processes that will build the mosaic image
         Process(
             target=build_mosaic,
-            args=(result_queue, all_tile_data_large, original_img_large),
+            args=(
+                result_queue,
+                all_tile_data_large,
+                original_img_large,
+                parameters,
+            ),
+            # args=(
+            #     result_queue,
+            #     all_tile_data_large,
+            #     original_img_large,
+            # ),
         ).start()
 
         # start the worker processes that will perform the tile fitting
-        for n in range(G_WORKER_COUNT):
+        for _ in range(parameters.worker_count):
             Process(
                 target=fit_tiles, args=(work_queue, result_queue, all_tile_data_small)
             ).start()
@@ -337,16 +376,16 @@ def compose(original_img, tiles):
         for x in range(mosaic.x_tile_count):
             for y in range(mosaic.y_tile_count):
                 large_box = (
-                    x * G_TILE_SIZE,
-                    y * G_TILE_SIZE,
-                    (x + 1) * G_TILE_SIZE,
-                    (y + 1) * G_TILE_SIZE,
+                    x * parameters.tile_size,
+                    y * parameters.tile_size,
+                    (x + 1) * parameters.tile_size,
+                    (y + 1) * parameters.tile_size,
                 )
                 small_box = (
-                    x * G_TILE_SIZE / G_TILE_BLOCK_SIZE,
-                    y * G_TILE_SIZE / G_TILE_BLOCK_SIZE,
-                    (x + 1) * G_TILE_SIZE / G_TILE_BLOCK_SIZE,
-                    (y + 1) * G_TILE_SIZE / G_TILE_BLOCK_SIZE,
+                    x * parameters.tile_size / parameters.tile_block_size,
+                    y * parameters.tile_size / parameters.tile_block_size,
+                    (x + 1) * parameters.tile_size / parameters.tile_block_size,
+                    (y + 1) * parameters.tile_size / parameters.tile_block_size,
                 )
                 work_queue.put(
                     (list(original_img_small.crop(small_box).getdata()), large_box)
@@ -358,7 +397,7 @@ def compose(original_img, tiles):
 
     finally:
         # put these special values onto the queue to let the workers know they can terminate
-        for n in range(G_WORKER_COUNT):
+        for _ in range(parameters.worker_count):
             work_queue.put((EOQ_VALUE, EOQ_VALUE))
 
 
@@ -366,13 +405,15 @@ def show_error(msg):
     print("ERROR: {}".format(msg))
 
 
-def mosaic(img_path, tiles_path):
-    image_data = TargetImage(img_path).get_data()
-    tiles_data = TileProcessor(tiles_path).get_tiles()
+def mosaic(parameters):
+    image_data = TargetImage(parameters).get_data()
+    tiles_data = TileProcessor(parameters).get_tiles()
     if tiles_data[0]:
-        compose(image_data, tiles_data)
+        compose(image_data, tiles_data, parameters)
     else:
-        show_error("No images found in tiles directory '{}'".format(tiles_path))
+        show_error(
+            "No images found in tiles directory '{}'".format(parameters.tiles_directory)
+        )
 
 
 def main(argv):
@@ -416,33 +457,27 @@ def main(argv):
     )
 
     args = parser.parse_args(argv)
-    print(args)
+    # print(args)
 
-    # setting globals
-    global G_TILE_SIZE
-    G_TILE_SIZE = args.tilesize
-    global G_TILE_MATCH_RES
-    G_TILE_MATCH_RES = args.tileres
-    global G_ENLARGEMENT
-    G_ENLARGEMENT = args.enlarge
+    # sets up parameters
+    params = Parameters(
+        source_image=args.image,
+        tiles_directory=args.tiles_directory,
+        output_file=args.output,
+        tile_size=args.tilesize,
+        match_res=args.tileres,
+        enlargement=args.enlarge,
+        tile_block_size=args.tilesize / max(min(args.tileres, DEFAULT_TILE_SIZE), 1),
+        worker_count=max((args.threads) - 1, 1),
+    )
+    # print(params)
 
-    global G_TILE_BLOCK_SIZE
-    G_TILE_BLOCK_SIZE = G_TILE_SIZE / max(min(G_TILE_MATCH_RES, DEFAULT_TILE_SIZE), 1)
-
-    global G_WORKER_COUNT
-    G_WORKER_COUNT = max((args.threads) - 1, 1)
-    global G_OUT_FILE
-    G_OUT_FILE = args.output
-
-    source_image = args.image
-    tile_dir = args.tiles_directory
-
-    if not os.path.isfile(source_image):
-        show_error("Unable to find image file '{}'".format(source_image))
-    elif not os.path.isdir(tile_dir):
-        show_error("Unable to find tile directory '{}'".format(tile_dir))
+    if not os.path.isfile(params.source_image):
+        show_error("Unable to find image file '{}'".format(params.source_image))
+    elif not os.path.isdir(params.tiles_directory):
+        show_error("Unable to find tile directory '{}'".format(params.tiles_directory))
     else:
-        mosaic(source_image, tile_dir)
+        mosaic(params)
 
 
 if __name__ == "__main__":
