@@ -98,7 +98,7 @@ class TileProcessor:
                 if large_tile and small_tile:
                     parsed_queue.put(
                         (
-                            list(large_tile.get_flattened_data()),
+                            large_tile,
                             list(small_tile.get_flattened_data()),
                         )
                     )
@@ -364,7 +364,7 @@ class MosaicImage:
 
     def add_tile(self, tile_data, coords):
         img = Image.new("RGB", (self.params.tile_size, self.params.tile_size))
-        img.putdata(tile_data)
+        img.putdata(tile_data.get_flattened_data())
         self.image.paste(img, coords)
 
     def save(self, path):
@@ -394,13 +394,13 @@ def build_mosaic(result_queue, all_tile_data_large, original_img_large, paramete
 
 
 def build_mosaic_multi(
-    result_queue, all_tile_data_large, original_img_large, parameters
+    mosaic, result_queue, all_tile_data_large, original_img_large, parameters
 ):
-    mosaic = MosaicImage(original_img_large, parameters)
     active_workers = parameters.worker_count
     usage_tab = [
         0 for _ in range(len(all_tile_data_large))
     ]  # number of times a tile is used
+    progress = ProgressCounter(mosaic.x_tile_count * mosaic.y_tile_count)
     while True:
         try:
             img_coords, best_list = result_queue.get()
@@ -417,6 +417,7 @@ def build_mosaic_multi(
                 tile_data = all_tile_data_large[best_list[index_in_best]]
                 usage_tab[best_list[index_in_best]] += 1
                 mosaic.add_tile(tile_data, img_coords)
+                progress.update()
 
         except KeyboardInterrupt:
             break
@@ -442,19 +443,14 @@ def compose(original_img, tiles, parameters):
     try:
         # start the worker processes that will build the mosaic image
         Process(
-            # target=build_mosaic,
             target=build_mosaic_multi,
             args=(
+                mosaic,
                 result_queue,
                 all_tile_data_large,
                 original_img_large,
                 parameters,
             ),
-            # args=(
-            #     result_queue,
-            #     all_tile_data_large,
-            #     original_img_large,
-            # ),
         ).start()
 
         # start the worker processes that will perform the tile fitting
@@ -464,7 +460,6 @@ def compose(original_img, tiles, parameters):
                 args=(work_queue, result_queue, all_tile_data_small, parameters),
             ).start()
 
-        progress = ProgressCounter(mosaic.x_tile_count * mosaic.y_tile_count)
         for x in range(mosaic.x_tile_count):
             for y in range(mosaic.y_tile_count):
                 large_box = (
@@ -485,7 +480,6 @@ def compose(original_img, tiles, parameters):
                         large_box,
                     )
                 )
-                progress.update()
 
     except KeyboardInterrupt:
         print("\nHalting, saving partial image please wait...")
