@@ -245,7 +245,7 @@ class TileFitter:
                 abs(t1[i][0] - t2[i][0])
                 + abs(t1[i][1] - t2[i][1])
                 + abs(t1[i][2] - t2[i][2])
-            ) / 2  # color part
+            )  # color part
 
             if diff > bail_out_value:
                 # we know already that this isn't going to be the best fit, so no point continuing with this tile
