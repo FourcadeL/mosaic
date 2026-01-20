@@ -1,9 +1,11 @@
+# TODO : should be able to not open all row data of large tiles versions
 import sys
 import os
 import os.path
 import argparse
 import pathlib
 from collections import namedtuple
+import heapq
 from PIL import Image, ImageOps
 from multiprocessing import Process, Queue, cpu_count
 
@@ -21,6 +23,7 @@ DEFAULT_ENLARGEMENT = (
 
 DEFAULT_WORKER_COUNT = max(cpu_count(), 2)
 DEFAULT_OUT_FILE = "mosaic.jpeg"
+DEFAULT_VARIETY = 40
 EOQ_VALUE = None
 
 # Parameter structure
@@ -35,6 +38,7 @@ Parameters = namedtuple(
         "enlargement",
         "tile_block_size",
         "worker_count",
+        "variety",
     ],
     defaults=[
         None,
@@ -45,6 +49,7 @@ Parameters = namedtuple(
         DEFAULT_ENLARGEMENT,
         None,
         DEFAULT_WORKER_COUNT,
+        DEFAULT_VARIETY,
     ],
 )
 
@@ -194,9 +199,38 @@ class TargetImage:
         return image_data
 
 
+class TileFitHeap:
+    """
+    A class to keep a heap of best tile index based on diff score
+    elements are : (diff_val, tile_index)
+    n is the maximum number of tiles
+    """
+
+    def __init__(self, n):
+        self.size = n
+        self.heap = []
+
+    def add(self, score_element):
+        if len(self.heap) < self.size:
+            heapq.heappush_max(self.heap, score_element)
+        else:
+            if self.heap[0][0] > score_element[0]:
+                heapq.heapreplace_max(self.heap, score_element)
+
+    def max_score(self):
+        if len(self.heap) < self.size:
+            return sys.maxsize
+        else:
+            return self.heap[0][0]
+
+    def get_ordered_best_fits(self):
+        return sorted(self.heap)
+
+
 class TileFitter:
-    def __init__(self, tiles_data):
+    def __init__(self, tiles_data, parameters):
         self.tiles_data = tiles_data
+        self.params = parameters
 
     def __get_tile_diff(self, t1, t2, bail_out_value):
         diff = 0
@@ -269,18 +303,36 @@ class TileFitter:
 
         return best_fit_tile_index
 
+    def get_best_fit_tiles(self, img_data):
+        max_heap = TileFitHeap(self.params.variety)
+        tile_index = 0
 
-def fit_tiles(work_queue, result_queue, tiles_data):
+        # go through each tile in turn looking for the best overall matches
+        # bail out value is the value of the wors image in the heap
+        for tile_data in self.tiles_data:
+            diff = self.__get_tile_diff_lum_color(
+                img_data, tile_data, max_heap.max_score()
+            )
+            if diff < max_heap.max_score():
+                max_heap.add((diff, tile_index))
+            tile_index += 1
+
+        return [e[1] for e in max_heap.get_ordered_best_fits()]
+
+
+def fit_tiles(work_queue, result_queue, tiles_data, parameters):
     # this function gets run by the worker processes, one on each CPU core
-    tile_fitter = TileFitter(tiles_data)
+    tile_fitter = TileFitter(tiles_data, parameters)
 
     while True:
         try:
             img_data, img_coords = work_queue.get(True)
             if img_data == EOQ_VALUE:
                 break
-            tile_index = tile_fitter.get_best_fit_tile(img_data)
-            result_queue.put((img_coords, tile_index))
+            # tile_index = tile_fitter.get_best_fit_tile(img_data)
+            tiles_bests = tile_fitter.get_best_fit_tiles(img_data)
+            # result_queue.put((img_coords, tile_index))
+            result_queue.put((img_coords, tiles_bests))
         except KeyboardInterrupt:
             pass
 
@@ -341,6 +393,37 @@ def build_mosaic(result_queue, all_tile_data_large, original_img_large, paramete
     print("\nFinished, output is in", parameters.output_file)
 
 
+def build_mosaic_multi(
+    result_queue, all_tile_data_large, original_img_large, parameters
+):
+    mosaic = MosaicImage(original_img_large, parameters)
+    active_workers = parameters.worker_count
+    usage_tab = [
+        0 for _ in range(len(all_tile_data_large))
+    ]  # number of times a tile is used
+    while True:
+        try:
+            img_coords, best_list = result_queue.get()
+
+            if img_coords == EOQ_VALUE:
+                active_workers -= 1
+                if not active_workers:
+                    break
+            else:
+                # find minimal used tile
+                index_in_best = sorted(
+                    [(usage_tab[best_list[i]], i) for i in range(len(best_list))]
+                )[0][1]
+                tile_data = all_tile_data_large[best_list[index_in_best]]
+                usage_tab[best_list[index_in_best]] += 1
+                mosaic.add_tile(tile_data, img_coords)
+
+        except KeyboardInterrupt:
+            break
+    mosaic.save(parameters.output_file)
+    print("\nFinished, output is in", parameters.output_file)
+
+
 def compose(original_img, tiles, parameters):
     print("Building mosaic, press Ctrl-C to abort...")
     original_img_large, original_img_small = original_img
@@ -359,7 +442,8 @@ def compose(original_img, tiles, parameters):
     try:
         # start the worker processes that will build the mosaic image
         Process(
-            target=build_mosaic,
+            # target=build_mosaic,
+            target=build_mosaic_multi,
             args=(
                 result_queue,
                 all_tile_data_large,
@@ -376,7 +460,8 @@ def compose(original_img, tiles, parameters):
         # start the worker processes that will perform the tile fitting
         for _ in range(parameters.worker_count):
             Process(
-                target=fit_tiles, args=(work_queue, result_queue, all_tile_data_small)
+                target=fit_tiles,
+                args=(work_queue, result_queue, all_tile_data_small, parameters),
             ).start()
 
         progress = ProgressCounter(mosaic.x_tile_count * mosaic.y_tile_count)
@@ -465,6 +550,13 @@ def main(argv):
         help="The size of the resulting image (X times the original)",
         default=DEFAULT_ENLARGEMENT,
     )
+    parser.add_argument(
+        "--variety",
+        "-vr",
+        type=int,
+        help="The variety parameter to avoid reusing the same tile",
+        default=DEFAULT_VARIETY,
+    )
 
     args = parser.parse_args(argv)
     # print(args)
@@ -479,6 +571,7 @@ def main(argv):
         enlargement=args.enlarge,
         tile_block_size=args.tilesize / max(min(args.tileres, DEFAULT_TILE_SIZE), 1),
         worker_count=max((args.threads) - 1, 1),
+        variety=args.variety,
     )
     # print(params)
 
