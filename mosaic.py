@@ -90,8 +90,13 @@ class TileProcessor:
                 tile_path = os.path.join(root, tile_name)
                 print("Reading {:40.40}".format(tile_name), flush=True, end="\r")
                 large_tile, small_tile = self.__process_tile(tile_path)
-                if large_tile:
-                    parsed_queue.put((large_tile, small_tile))
+                if large_tile and small_tile:
+                    parsed_queue.put(
+                        (
+                            list(large_tile.get_flattened_data()),
+                            list(small_tile.get_flattened_data()),
+                        )
+                    )
             except KeyboardInterrupt:
                 pass
         parsed_queue.put((EOQ_VALUE, EOQ_VALUE))
@@ -343,8 +348,10 @@ def compose(original_img, tiles, parameters):
 
     mosaic = MosaicImage(original_img_large, parameters)
 
-    all_tile_data_large = [list(tile.getdata()) for tile in tiles_large]
-    all_tile_data_small = [list(tile.getdata()) for tile in tiles_small]
+    # all_tile_data_large = [list(tile.get_flattened_data()) for tile in tiles_large]
+    # all_tile_data_small = [list(tile.get_flattened_data()) for tile in tiles_small]
+    all_tile_data_large = tiles_large
+    all_tile_data_small = tiles_small
 
     work_queue = Queue(parameters.worker_count)
     result_queue = Queue()
@@ -388,7 +395,10 @@ def compose(original_img, tiles, parameters):
                     (y + 1) * parameters.tile_size / parameters.tile_block_size,
                 )
                 work_queue.put(
-                    (list(original_img_small.crop(small_box).getdata()), large_box)
+                    (
+                        list(original_img_small.crop(small_box).get_flattened_data()),
+                        large_box,
+                    )
                 )
                 progress.update()
 
