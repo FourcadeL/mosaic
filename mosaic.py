@@ -222,9 +222,9 @@ class TileFitter:
         diff = 0
         for i in range(len(t1)):
             diff += (
-                    (0.2126*t1[i][0] + 0.7152*t1[i][1] + 0.0722*t1[i][2]) -
-                    (0.2126*t2[i][0] + 0.7152*t2[i][1] + 0.0722*t2[i][2])
-                    )**2
+                (0.2126 * t1[i][0] + 0.7152 * t1[i][1] + 0.0722 * t1[i][2])
+                - (0.2126 * t2[i][0] + 0.7152 * t2[i][1] + 0.0722 * t2[i][2])
+            ) ** 2
             if diff > bail_out_value:
                 # we know already that this isn't going to be the best fit, so no point continuing with this tile
                 return diff
@@ -238,14 +238,14 @@ class TileFitter:
         diff = 0
         for i in range(len(t1)):
             diff += (
-                    (0.2126*t1[i][0] + 0.7152*t1[i][1] + 0.0722*t1[i][2]) -
-                    (0.2126*t2[i][0] + 0.7152*t2[i][1] + 0.0722*t2[i][2])
-                    )**2  # luminance part
+                (0.2126 * t1[i][0] + 0.7152 * t1[i][1] + 0.0722 * t1[i][2])
+                - (0.2126 * t2[i][0] + 0.7152 * t2[i][1] + 0.0722 * t2[i][2])
+            ) ** 2  # luminance part
             diff += (
                 abs(t1[i][0] - t2[i][0])
                 + abs(t1[i][1] - t2[i][1])
                 + abs(t1[i][2] - t2[i][2])
-            )/4  # color part
+            ) / 2  # color part
 
             if diff > bail_out_value:
                 # we know already that this isn't going to be the best fit, so no point continuing with this tile
