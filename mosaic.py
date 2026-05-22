@@ -272,13 +272,16 @@ class TileFitter:
         diff = 0
         for i in range(len(t1)):
             diff += (
-                (0.2126 * t1[i][0] + 0.7152 * t1[i][1] + 0.0722 * t1[i][2])
-                - (0.2126 * t2[i][0] + 0.7152 * t2[i][1] + 0.0722 * t2[i][2])
-            ) ** 2  # luminance part
+                (
+                    (0.2126 * t1[i][0] + 0.7152 * t1[i][1] + 0.0722 * t1[i][2])
+                    - (0.2126 * t2[i][0] + 0.7152 * t2[i][1] + 0.0722 * t2[i][2])
+                )
+                ** 2
+            ) / 2  # luminance part
             diff += (
-                abs(t1[i][0] - t2[i][0])
-                + abs(t1[i][1] - t2[i][1])
-                + abs(t1[i][2] - t2[i][2])
+                abs(t1[i][0] - t2[i][0]) ** 2
+                + abs(t1[i][1] - t2[i][1]) ** 2
+                + abs(t1[i][2] - t2[i][2]) ** 2
             )  # color part
 
             if diff > bail_out_value:
@@ -520,35 +523,35 @@ def main(argv):
         "--threads",
         "-t",
         type=int,
-        help="The number of threads to use",
+        help=f"The number of threads to use (computed default is {DEFAULT_WORKER_COUNT})",
         default=DEFAULT_WORKER_COUNT,
     )
     parser.add_argument(
         "--tilesize",
         "-ts",
         type=int,
-        help="The size (in pixels) of the tiles",
+        help=f"The size (in pixels) of the tiles (default is {DEFAULT_TILE_SIZE})",
         default=DEFAULT_TILE_SIZE,
     )
     parser.add_argument(
         "--tileres",
         "-tr",
         type=int,
-        help="Tile matching resolution (the level of detail used for tile matching)",
+        help=f"Tile matching resolution (default is {DEFAULT_TILE_MATCH_RES})",
         default=DEFAULT_TILE_MATCH_RES,
     )
     parser.add_argument(
         "--enlarge",
         "-r",
         type=int,
-        help="The size of the resulting image (X times the original)",
+        help=f"The size of the resulting image X times the original (default is {DEFAULT_ENLARGEMENT})",
         default=DEFAULT_ENLARGEMENT,
     )
     parser.add_argument(
         "--variety",
         "-vr",
         type=int,
-        help="The variety parameter to avoid reusing the same tile",
+        help=f"The variety parameter to avoid reusing the same tile (default is {DEFAULT_VARIETY})",
         default=DEFAULT_VARIETY,
     )
 
