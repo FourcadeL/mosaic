@@ -17,9 +17,7 @@ Image.MAX_IMAGE_PIXELS = (
 # DEFAULT parameters
 DEFAULT_TILE_SIZE = 50  # height/width of mosaic tiles in pixels
 DEFAULT_TILE_MATCH_RES = 5  # tile matching resolution (higher values give better fit but require more processing)
-DEFAULT_ENLARGEMENT = (
-    8  # the mosaic image will be this many times wider and taller than the original
-)
+DEFAULT_IMRES = 50 # horizontal resolution (in tiles) of the final image
 
 DEFAULT_WORKER_COUNT = max(cpu_count(), 2)
 DEFAULT_OUT_FILE = "mosaic.jpeg"
@@ -35,7 +33,7 @@ Parameters = namedtuple(
         "output_file",
         "tile_size",
         "match_res",
-        "enlargement",
+        "image_res",
         "tile_block_size",
         "worker_count",
         "variety",
@@ -46,7 +44,7 @@ Parameters = namedtuple(
         DEFAULT_OUT_FILE,
         DEFAULT_TILE_SIZE,
         DEFAULT_TILE_MATCH_RES,
-        DEFAULT_ENLARGEMENT,
+        DEFAULT_IMRES,
         None,
         DEFAULT_WORKER_COUNT,
         DEFAULT_VARIETY,
@@ -163,8 +161,10 @@ class TargetImage:
     def get_data(self):
         print("Processing main image...")
         img = Image.open(self.params.source_image)
-        w = img.size[0] * self.params.enlargement
-        h = img.size[1] * self.params.enlargement
+        w = self.params.image_res * self.params.tile_size
+        h = int(w*(img.size[1]/img.size[0]))
+        # w = img.size[0] * self.params.enlargement
+        # h = img.size[1] * self.params.enlargement
         new_size = w * h
         if new_size > Image.MAX_IMAGE_PIXELS:
             print(
@@ -277,7 +277,7 @@ class TileFitter:
                     - (0.2126 * t2[i][0] + 0.7152 * t2[i][1] + 0.0722 * t2[i][2])
                 )
                 ** 2
-            ) / 2  # luminance part
+            ) / 4  # luminance part
             diff += (
                 abs(t1[i][0] - t2[i][0]) ** 2
                 + abs(t1[i][1] - t2[i][1]) ** 2
@@ -316,6 +316,9 @@ class TileFitter:
             diff = self.__get_tile_diff_lum_color(
                 img_data, tile_data, max_heap.max_score()
             )
+            # diff = self.__get_tile_diff(
+            #     img_data, tile_data, max_heap.max_score()
+            # )
             if diff < max_heap.max_score():
                 max_heap.add((diff, tile_index))
             tile_index += 1
@@ -527,25 +530,25 @@ def main(argv):
         default=DEFAULT_WORKER_COUNT,
     )
     parser.add_argument(
-        "--tilesize",
-        "-ts",
+        "--tileres",
+        "-tr",
         type=int,
-        help=f"The size (in pixels) of the tiles (default is {DEFAULT_TILE_SIZE})",
+        help=f"The resolution (in pixels) of the tiles (default is {DEFAULT_TILE_SIZE})",
         default=DEFAULT_TILE_SIZE,
     )
     parser.add_argument(
-        "--tileres",
-        "-tr",
+        "--matchres",
+        "-mr",
         type=int,
         help=f"Tile matching resolution (default is {DEFAULT_TILE_MATCH_RES})",
         default=DEFAULT_TILE_MATCH_RES,
     )
     parser.add_argument(
-        "--enlarge",
+        "--imres",
         "-r",
         type=int,
-        help=f"The size of the resulting image X times the original (default is {DEFAULT_ENLARGEMENT})",
-        default=DEFAULT_ENLARGEMENT,
+        help=f"The horizontal resolution of resulting image in number of tiles (default is {DEFAULT_IMRES})",
+        default=DEFAULT_IMRES
     )
     parser.add_argument(
         "--variety",
@@ -563,10 +566,10 @@ def main(argv):
         source_image=args.image,
         tiles_directory=args.tiles_directory,
         output_file=args.output,
-        tile_size=args.tilesize,
-        match_res=args.tileres,
-        enlargement=args.enlarge,
-        tile_block_size=args.tilesize / max(min(args.tileres, DEFAULT_TILE_SIZE), 1),
+        tile_size=args.tileres,
+        match_res=args.matchres,
+        image_res=args.imres,
+        tile_block_size=args.tileres / max(min(args.matchres, DEFAULT_TILE_SIZE), 1),
         worker_count=max((args.threads) - 1, 1),
         variety=args.variety,
     )
