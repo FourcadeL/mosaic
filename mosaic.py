@@ -70,14 +70,14 @@ class TileProcessor:
             img = img.crop((w_crop, h_crop, w - w_crop, h - h_crop))
 
             large_tile_img = img.resize(
-                (self.params.tile_size, self.params.tile_size), Image.LANCZOS
+                (self.params.tile_size, self.params.tile_size), Image.Resampling.LANCZOS
             )
             small_tile_img = img.resize(
                 (
                     int(self.params.tile_size / self.params.tile_block_size),
                     int(self.params.tile_size / self.params.tile_block_size),
                 ),
-                Image.LANCZOS,
+                Image.Resampling.LANCZOS,
             )
 
             return (large_tile_img.convert("RGB"), small_tile_img.convert("RGB"))
@@ -176,7 +176,7 @@ class TargetImage:
             )
             sys.exit(1)
             raise Image.DecompressionBombError("Too large after resize")
-        large_img = img.resize((w, h), Image.LANCZOS)
+        large_img = img.resize((w, h), Image.Resampling.LANCZOS)
         w_diff = (w % self.params.tile_size) / 2
         h_diff = (h % self.params.tile_size) / 2
 
@@ -189,7 +189,7 @@ class TargetImage:
                 int(w / self.params.tile_block_size),
                 int(h / self.params.tile_block_size),
             ),
-            Image.LANCZOS,
+            Image.Resampling.LANCZOS,
         )
 
         image_data = (large_img.convert("RGB"), small_img.convert("RGB"))
